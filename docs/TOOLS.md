@@ -1,46 +1,20 @@
-# M1 tool: list_files
+# M2 tools
 
-Lists permitted workspace files and directories with bounded output. Read-only annotations describe the tool to hosts; server-side checks enforce policy independently of those annotations.
+Inspector: connect to `http://127.0.0.1:3000/mcp`, choose a tool and enter its JSON arguments. Replace `<hash>` with the latest `sha256` from `read_file` or a successful edit. Use a disposable filename that does not already exist.
 
-| Argument    | Type / default    | Constraint                                                        |
-| ----------- | ----------------- | ----------------------------------------------------------------- |
-| `path`      | string / `.`      | Relative directory, 1–512 characters. Both slash styles accepted. |
-| `recursive` | boolean / `false` | Descend up to 8 entry levels.                                     |
-| `limit`     | integer / `50`    | 1–100 returned entries.                                           |
-| `offset`    | integer / `0`     | 0–1000 permitted entries to skip.                                 |
+| Tool         | Example input                                                                                      | Result / restrictions                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| list_files   | `{"path":"projects","recursive":false,"limit":50,"offset":0}`                                      | Metadata and `next_offset`; M1 behavior retained.                                                                         |
+| write_file   | `{"path":"projects/m2-check.txt","content":"hello"}`                                               | Created path, size, hash. Parent must exist; no overwrite option.                                                         |
+| read_file    | `{"path":"projects/m2-check.txt","start_line":1,"max_lines":200}`                                  | Text, full-file hash, total lines, `has_more`, `next_line/next_column`.                                                   |
+| str_replace  | `{"path":"projects/m2-check.txt","old_text":"hello","new_text":"done","expected_sha256":"<hash>"}` | New hash and one replacement; rejects zero or multiple matches, including overlaps.                                       |
+| search_files | `{"path":"projects","query":"done","mode":"text","max_results":20}`                                | Paths, matching line numbers/excerpts, skipped count and truncation flags. Use `mode:"name"` for literal filename search. |
+| delete_file  | `{"path":"projects/m2-check.txt","confirm":true,"expected_sha256":"<hash>"}`                       | Recovery ID; moves the file into private recovery storage.                                                                |
 
-Unknown keys, coercible strings in numeric/boolean fields, and null arguments are rejected. Paths must not be absolute, contain parent or dot segments, empty segments, control characters, Windows device names, alternate-data-stream colons, wildcards, or trailing dots/spaces. Root is represented by `.` only.
+All schemas reject unknown arguments. Paths are relative and share the protected-path/link policy. File operations support UTF-8 text only, at most 256 KiB, with binary controls and multiple hard links rejected. Input text is at most 16 KiB per field. Outputs include text and structured JSON, capped together at 32 KiB.
 
-```json
-{ "path": "projects", "recursive": false, "limit": 10, "offset": 0 }
-```
+Read defaults: line 1, 200 lines; maximum 500 lines and 8 KiB of content per call. Use the returned cursor as `start_line` and `start_column` (zero-based Unicode character offset) to continue even within a long line. Preserve/check the hash across pages.
 
-Example result (timestamps depend on the actual files):
+Search defaults to case-insensitive literal text, with one result per matching line. Bounds: 1000 scanned entries, 8 levels, 100 candidate files, 2 MiB read budget (including rejected binary reads), 100 results and 160-character excerpts. Both search modes skip unsupported files. Narrow the path when truncated; search has no continuation cursor. Listing offsets are best-effort on an unchanged directory.
 
-```json
-{
-  "path": "projects",
-  "entries": [
-    {
-      "path": "projects/welcome.md",
-      "type": "file",
-      "size_bytes": 82,
-      "modified_at": "2026-10-13T00:00:00.000Z"
-    }
-  ],
-  "returned": 1,
-  "truncated": false,
-  "next_offset": null,
-  "scan_limit_reached": false,
-  "depth_limit_reached": false,
-  "output_limit_reached": false
-}
-```
-
-This is an illustrative contract, not captured evidence. Directories report `size_bytes: 0`; directory byte sizes are platform-dependent and not useful here. Modification times are ISO 8601 UTC. All entry paths are relative to the workspace root, including when a narrower directory is requested.
-
-The tool returns matching JSON in a text content block and `structuredContent`. The listing payload is capped at approximately 12 KiB, reserving room to keep the serialized tool result below 32 KiB. Scans examine at most 1000 directory entries total (including protected entries), with at most 8 recursive levels. Inaccessible, linked, protected, invalid, and concurrently removed entries are omitted without returning their names.
-
-Use `next_offset` only with the same `path` and `recursive` values. Offsets are best-effort on an unchanged workspace, not snapshot cursors. When scan/depth limits apply, even a null `next_offset` does **not** mean the entire subtree was examined; choose a narrower path. Scanning a directory with more than 1000 entries sees a bounded subset in OS enumeration order before sorting. Pagination cannot recover entries beyond that budget.
-
-Expected tool errors include `INVALID_PATH`, `PROTECTED_PATH`, `LINK_NOT_ALLOWED`, `OUTSIDE_WORKSPACE`, `NOT_FOUND`, `NOT_DIRECTORY`, `ACCESS_DENIED`, and sanitized `INTERNAL_ERROR`. SDK schema errors also return `isError: true`. The SDK controls protocol-level errors. Raw native errors and stack traces are never deliberately included in application results.
+Failures return MCP `isError:true`. Common codes: `INVALID_INPUT`, `INVALID_PATH`, `PROTECTED_PATH`, `LINK_NOT_ALLOWED`, `HARD_LINK_NOT_ALLOWED`, `NOT_FOUND`, `NOT_FILE`, `BINARY_FILE`, `FILE_TOO_LARGE`, `ALREADY_EXISTS`, `CONFLICT`, `NO_MATCH`, `MULTIPLE_MATCHES`, `UNSAFE_RECOVERY`. Native errors are sanitized.

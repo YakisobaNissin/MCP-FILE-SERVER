@@ -1,0 +1,9 @@
+M2 — 2026-10-13, Asia/Manila
+M1 baseline commit: 8242a4a
+Final checks: build, typecheck, test, format:check and git diff --check passed.
+Vitest: 6 test files passed; 139 tests passed, 1 skipped (140 total).
+Skipped: actual file-symlink fixture; Windows denied creation with EPERM.
+Real junction and hard-link tests executed and passed.
+All six tools discovered; modern and legacy MCP HTTP workflows passed.
+No dependency versions changed. No real user/demo files mutated by tests.
+M2 Inspector GUI and Codex integration were not exercised.

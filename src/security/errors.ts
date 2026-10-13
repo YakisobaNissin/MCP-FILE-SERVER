@@ -1,3 +1,5 @@
+import { ZodError } from "zod/v4";
+
 /** Only these deliberately written messages may cross the MCP boundary. */
 export class WorkspaceError extends Error {
   constructor(
@@ -10,6 +12,11 @@ export class WorkspaceError extends Error {
 }
 
 export function publicError(error: unknown): { code: string; message: string } {
+  if (error instanceof ZodError)
+    return {
+      code: "INVALID_INPUT",
+      message: "Invalid tool arguments. Check the tool schema and size limits.",
+    };
   if (error instanceof WorkspaceError) {
     return { code: error.code, message: error.message };
   }
@@ -17,7 +24,7 @@ export function publicError(error: unknown): { code: string; message: string } {
   if (code === "ENOENT")
     return {
       code: "NOT_FOUND",
-      message: "The requested directory does not exist.",
+      message: "The requested path does not exist.",
     };
   if (code === "ENOTDIR")
     return {
@@ -27,9 +34,14 @@ export function publicError(error: unknown): { code: string; message: string } {
   if (code === "EACCES" || code === "EPERM") {
     return {
       code: "ACCESS_DENIED",
-      message: "The requested directory cannot be accessed.",
+      message: "The requested path cannot be accessed.",
     };
   }
+  if (code === "EEXIST")
+    return {
+      code: "ALREADY_EXISTS",
+      message: "The target already exists. Overwriting is not supported.",
+    };
   return {
     code: "INTERNAL_ERROR",
     message: "The operation failed. Check the local server configuration.",

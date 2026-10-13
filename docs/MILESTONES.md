@@ -1,11 +1,9 @@
-# Assignment status
+# Status
 
-| Milestone                                                                                 | Status                                  |
-| ----------------------------------------------------------------------------------------- | --------------------------------------- |
-| M1: skeleton, local Streamable HTTP, list_files, initial sandbox, sample workspace, tests | Implemented; verification in TESTING.md |
-| M2: read/write/replace/delete/search, stronger permissions                                | Not started; requires approval          |
-| M3: authenticated HTTPS, ngrok, PM2, actual host connectivity                             | Not started                             |
-| M4: Git tools and persistent handoff protocol                                             | Not started                             |
-| M5: Codex integration and genuinely separate agent-session proof                          | Not started                             |
+- M1: complete; preserved as local baseline commit `8242a4a`.
+- M2: six filesystem tools implemented; bounded operations, shared auditing, security and HTTP tests.
+- M3: authentication, HTTPS/ngrok and PM2 — not started.
+- M4: Git and handoff tools — not started.
+- M5: Codex connection and separate-session evidence — not started.
 
-The demo contains `PROJECT_STATE.md`, `PLAN_LOG`, `CHECKPOINTS`, `DECISIONS`, and `projects` as minimal sample data. The full handoff protocol and `SESSION_TRANSCRIPT.md` will be created when actual handoff work happens. There is no fabricated multi-session evidence. M1 verification uses the official SDK client and Inspector CLI; it does not prove that Codex has connected to this connector.
+Stop after M2; later milestones require approval. Demo handoff folders remain placeholders. No public exposure, remote push or Codex integration is claimed.

@@ -1,6 +1,8 @@
+import type { ToolName } from "../tools/schemas.js";
+
 export interface AuditEvent {
   time: string;
-  tool: "list_files";
+  tool: ToolName;
   outcome: "success" | "error";
   duration_ms: number;
   returned?: number;

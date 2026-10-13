@@ -7,7 +7,7 @@ async function main(): Promise<void> {
   const { app, close } = createApp(config.sandbox);
   const listener = app.listen(config.port, config.host, () => {
     console.error(
-      `M1 MCP endpoint: http://${config.host}:${config.port}/mcp (local only)`,
+      `M2 MCP endpoint: http://${config.host}:${config.port}/mcp (local only)`,
     );
   });
   listener.on("error", () => {

@@ -9,3 +9,10 @@ logs/
 .DS_Store
 Thumbs.db
 .test-workspaces/
+.mcp-trash/
+.mcp-tmp-*
+audit*.jsonl
+demo-workspace/
+*.pem
+*.key
+*.pfx

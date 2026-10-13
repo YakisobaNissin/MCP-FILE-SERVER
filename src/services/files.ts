@@ -25,13 +25,13 @@ export interface Listing {
   output_limit_reached: boolean;
 }
 
-export async function listFiles(
+export async function scanEntries(
   sandbox: Sandbox,
-  rawInput: ListFilesInput,
-): Promise<Listing> {
-  const input = listFilesSchema.parse(rawInput);
-  await sandbox.directory(input.path);
-  const base = validateRelativePath(input.path).join("/");
+  relativePath: string,
+  recursive: boolean,
+) {
+  await sandbox.directory(relativePath);
+  const base = validateRelativePath(relativePath).join("/");
   const found: FileEntry[] = [];
   let scanned = 0;
   let scanLimit = false;
@@ -66,7 +66,7 @@ export async function listFiles(
           size_bytes: stats.isFile() ? stats.size : 0,
           modified_at: stats.mtime.toISOString(),
         });
-        if (input.recursive && stats.isDirectory()) {
+        if (recursive && stats.isDirectory()) {
           if (depth >= MAX_DEPTH) depthLimit = true;
           else if (scanned < MAX_SCANNED_ENTRIES)
             await walk(childPath, depth + 1);
@@ -80,6 +80,19 @@ export async function listFiles(
   }
 
   await walk(base, 1);
+  return { base, found, scanLimit, depthLimit };
+}
+
+export async function listFiles(
+  sandbox: Sandbox,
+  rawInput: ListFilesInput,
+): Promise<Listing> {
+  const input = listFilesSchema.parse(rawInput);
+  const { base, found, scanLimit, depthLimit } = await scanEntries(
+    sandbox,
+    input.path,
+    input.recursive,
+  );
   const listing: Listing = {
     path: base || ".",
     entries: [],

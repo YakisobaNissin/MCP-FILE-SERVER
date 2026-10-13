@@ -5,10 +5,10 @@ import type { ErrorRequestHandler } from "express";
 import type { Sandbox } from "./security/sandbox.js";
 import { createServer } from "./tools/index.js";
 import { stderrAudit, type AuditSink } from "./logging/audit.js";
-import { listFilesSchema } from "./tools/schemas.js";
+import { toolSchemas, type ToolName } from "./tools/schemas.js";
 
 export function createApp(sandbox: Sandbox, audit: AuditSink = stderrAudit) {
-  const app = createMcpExpressApp({ host: "127.0.0.1", jsonLimit: "16kb" });
+  const app = createMcpExpressApp({ host: "127.0.0.1", jsonLimit: "256kb" });
   app.disable("x-powered-by");
   const handler = createMcpHandler(() => createServer(sandbox, audit));
   const nodeHandler = toNodeHandler(handler);
@@ -28,13 +28,15 @@ export function createApp(sandbox: Sandbox, audit: AuditSink = stderrAudit) {
         typeof params === "object" &&
         params !== null &&
         "name" in params &&
-        params.name === "list_files"
+        typeof params.name === "string" &&
+        Object.hasOwn(toolSchemas, params.name)
       ) {
         const args = "arguments" in params ? params.arguments : {};
-        if (!listFilesSchema.safeParse(args).success) {
+        const tool = params.name as ToolName;
+        if (!toolSchemas[tool].safeParse(args).success) {
           audit({
             time: new Date().toISOString(),
-            tool: "list_files",
+            tool,
             outcome: "error",
             duration_ms: 0,
             error_code: "INVALID_INPUT",
