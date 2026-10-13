@@ -1,6 +1,6 @@
-# Secure MCP File Server — M2
+# Secure MCP File Server — M3
 
-Six workspace tools over Streamable HTTP at `http://127.0.0.1:3000/mcp`. Node 24, TypeScript, official MCP SDK v2, Zod, and Vitest. The source repository and managed workspace remain separate.
+Six workspace tools over authenticated Streamable HTTP. Node 24, TypeScript, official MCP SDK v2, Zod, and Vitest. The source repository and managed workspace remain separate. [M3 deployment and verification](docs/DEPLOYMENT.md).
 
 ```powershell
 Set-Location C:\MCPAssignment\mcp-file-server
@@ -11,12 +11,12 @@ npm run build
 npm start
 ```
 
-`.env` requires an existing absolute `WORKSPACE_ROOT`; `PORT` defaults to 3000. The initializer preserves existing sibling demo files. Stop with Ctrl+C. Use `npm run dev` for source development.
+`.env` requires an existing absolute `WORKSPACE_ROOT` and a private `MCP_TOKEN_FILE` outside the source/workspace; `PORT` defaults to 3000. Provision the private token before startup. The initializer preserves existing sibling demo files. Stop with Ctrl+C. Use `npm run dev` for source development.
 
 In another terminal, open Inspector:
 
 ```powershell
-npx --yes @modelcontextprotocol/inspector@2.10.1 --server-url http://127.0.0.1:3000/mcp --transport http
+npx --yes @modelcontextprotocol/inspector@2.10.1 --cli --config C:\MCPAssignment\.mcp-secrets\inspector.json --server secure-files --method tools/list
 ```
 
 Connect using Streamable HTTP, list tools, then use the [six example inputs](docs/TOOLS.md). Create a disposable file, read its hash, replace once, search, and confirm deletion. Deletion is recoverable; it never recursively removes directories.
@@ -28,6 +28,6 @@ npm test
 npm run format:check
 ```
 
-Local only: authentication is deferred to M3. Do not tunnel this endpoint. [Security limits](docs/SECURITY.md), [testing](docs/TESTING.md), [architecture](docs/ARCHITECTURE.md), [status](docs/MILESTONES.md).
+The listener stays loopback; ngrok exposes only the authenticated endpoint. [Security limits](docs/SECURITY.md), [testing](docs/TESTING.md), [architecture](docs/ARCHITECTURE.md), [status](docs/MILESTONES.md).
 
-M1 baseline commit: `8242a4a`. M2 changes are left for review; nothing was pushed. M3–M5 and Codex integration are not implemented.
+M1 baseline: `8242a4a`; M2: `fe86588`. M3 changes remain for review; nothing was pushed. M4/M5 and Codex integration are not implemented.

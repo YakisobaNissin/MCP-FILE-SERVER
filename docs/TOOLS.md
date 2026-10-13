@@ -1,6 +1,6 @@
 # M2 tools
 
-Inspector: connect to `http://127.0.0.1:3000/mcp`, choose a tool and enter its JSON arguments. Replace `<hash>` with the latest `sha256` from `read_file` or a successful edit. Use a disposable filename that does not already exist.
+All calls now require bearer authentication; see [deployment](DEPLOYMENT.md) for the private Inspector config and HTTPS URL. Tool contracts below are unchanged. Replace `<hash>` with the latest `sha256` from `read_file` or a successful edit. Use a disposable filename that does not already exist.
 
 | Tool         | Example input                                                                                      | Result / restrictions                                                                                                     |
 | ------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |

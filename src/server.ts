@@ -4,10 +4,13 @@ import { publicError } from "./security/errors.js";
 
 async function main(): Promise<void> {
   const config = await loadConfig();
-  const { app, close } = createApp(config.sandbox);
+  const { app, close } = createApp(config.sandbox, {
+    bearerToken: config.bearerToken,
+    publicHost: config.publicHost,
+  });
   const listener = app.listen(config.port, config.host, () => {
     console.error(
-      `M2 MCP endpoint: http://${config.host}:${config.port}/mcp (local only)`,
+      `M3 authenticated MCP endpoint: http://${config.host}:${config.port}/mcp (loopback)`,
     );
   });
   listener.on("error", () => {
@@ -21,10 +24,16 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     listener.close();
-    void close().finally(() => listener.closeAllConnections());
+    void close().finally(() => {
+      listener.closeAllConnections();
+      if (process.connected) process.disconnect();
+    });
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  process.on("message", (message: unknown) => {
+    if (message === "shutdown") shutdown();
+  });
 }
 
 main().catch((error: unknown) => {

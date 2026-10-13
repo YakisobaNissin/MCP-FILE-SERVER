@@ -13,6 +13,12 @@ import { writeFile, readFile, readdir, symlink } from "node:fs/promises";
 import path from "node:path";
 
 const unusedHash = "0".repeat(64);
+const testToken = "test-only-" + "a".repeat(43);
+const authHeaders = { Authorization: `Bearer ${testToken}` };
+const authenticatedTransport = (url: URL) =>
+  new StreamableHTTPClientTransport(url, {
+    requestInit: { headers: authHeaders },
+  });
 function argumentsFor(
   name: ToolName,
   requested: string,
@@ -49,7 +55,14 @@ describe("real MCP Streamable HTTP integration", () => {
   beforeEach(async () => {
     context = await fixture();
     events = [];
-    const running = createApp(context.sandbox, (event) => events.push(event));
+    const running = createApp(
+      context.sandbox,
+      {
+        bearerToken: testToken,
+        publicHost: "smitten-darkish-many.ngrok-free.dev",
+      },
+      (event) => events.push(event),
+    );
     closeHandler = running.close;
     listener = await new Promise<Server>((resolve) => {
       const server = running.app.listen(0, "127.0.0.1", () => resolve(server));
@@ -70,7 +83,7 @@ describe("real MCP Streamable HTTP integration", () => {
   });
 
   it("initializes, discovers six strict tools, invokes listing, and audits success", async () => {
-    await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
+    await client.connect(authenticatedTransport(new URL(endpoint)));
     const discovery = await client.listTools();
     expect(discovery.tools.map((tool) => tool.name)).toEqual([
       "list_files",
@@ -97,8 +110,94 @@ describe("real MCP Streamable HTTP integration", () => {
     expect(JSON.stringify(events)).not.toContain(context.root);
   });
 
+  it("rejects missing, invalid, query-string, and duplicate credentials before parsing or tool calls", async () => {
+    for (const method of ["GET", "POST", "DELETE"]) {
+      const response = await fetch(endpoint, {
+        method,
+        ...(method === "POST"
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: "{ malformed",
+            }
+          : {}),
+      });
+      expect(response.status).toBe(401);
+      expect(response.headers.get("www-authenticate")).toContain("Bearer");
+      expect(await response.json()).toEqual({ error: "Unauthorized" });
+    }
+    for (const authorization of [
+      "Bearer wrong",
+      "Basic ignored",
+      `Bearer ${"z".repeat(43)}`,
+    ]) {
+      expect(
+        (await fetch(endpoint, { headers: { Authorization: authorization } }))
+          .status,
+      ).toBe(401);
+    }
+    expect((await fetch(`${endpoint}?access_token=${testToken}`)).status).toBe(
+      401,
+    );
+    const duplicate = await new Promise<number | undefined>(
+      (resolve, reject) => {
+        const req = request(
+          endpoint,
+          {
+            headers: {
+              Authorization: [
+                authHeaders.Authorization,
+                authHeaders.Authorization,
+              ],
+            },
+          },
+          (res) => {
+            res.resume();
+            resolve(res.statusCode);
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      },
+    );
+    expect(duplicate).toBe(401);
+    expect(events).toEqual([]);
+  });
+
+  it("accepts only the configured public Host while preserving authentication and Origin guards", async () => {
+    const response = await new Promise<{
+      status: number | undefined;
+      body: string;
+    }>((resolve, reject) => {
+      const req = request(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            ...authHeaders,
+            Host: "smitten-darkish-many.ngrok-free.dev",
+            Origin: "https://smitten-darkish-many.ngrok-free.dev",
+            "Content-Type": "application/json",
+            Accept: "application/json, text/event-stream",
+          },
+        },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => {
+            body += chunk;
+          });
+          res.on("end", () => resolve({ status: res.statusCode, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toContain("list_files");
+  });
+
   it("reports traversal and missing targets as safe MCP tool errors", async () => {
-    await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
+    await client.connect(authenticatedTransport(new URL(endpoint)));
     for (const [requested, code] of [
       ["../outside", "INVALID_PATH"],
       ["missing", "NOT_FOUND"],
@@ -121,7 +220,7 @@ describe("real MCP Streamable HTTP integration", () => {
   });
 
   it("rejects and audits schema violations through MCP", async () => {
-    await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
+    await client.connect(authenticatedTransport(new URL(endpoint)));
     const result = await client.callTool({
       name: "list_files",
       arguments: { limit: 1000 },
@@ -135,6 +234,7 @@ describe("real MCP Streamable HTTP integration", () => {
 
   it("supports the legacy 2025 initialization/discovery lifecycle", async () => {
     const headers = {
+      ...authHeaders,
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
     };
@@ -168,7 +268,7 @@ describe("real MCP Streamable HTTP integration", () => {
       { name: "modern-m1-test", version: "1.0.0" },
       { versionNegotiation: { mode: { pin: "2026-07-28" } } },
     );
-    await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
+    await client.connect(authenticatedTransport(new URL(endpoint)));
     expect(client.getProtocolEra()).toBe("modern");
     expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
     expect((await client.listTools()).tools[0]!.name).toBe("list_files");
@@ -191,10 +291,14 @@ describe("real MCP Streamable HTTP integration", () => {
       // actually transmit the attacker-controlled Host header under test.
       const status = await new Promise<number | undefined>(
         (resolve, reject) => {
-          const req = request(endpoint, { headers }, (res) => {
-            res.resume();
-            resolve(res.statusCode);
-          });
+          const req = request(
+            endpoint,
+            { headers: { ...authHeaders, ...headers } },
+            (res) => {
+              res.resume();
+              resolve(res.statusCode);
+            },
+          );
           req.on("error", reject);
           req.end();
         },
@@ -204,7 +308,7 @@ describe("real MCP Streamable HTTP integration", () => {
   });
 
   it("bounds HTTP body size and sanitizes malformed JSON errors", async () => {
-    const headers = { "Content-Type": "application/json" };
+    const headers = { ...authHeaders, "Content-Type": "application/json" };
     const malformed = await fetch(endpoint, {
       method: "POST",
       headers,
@@ -230,9 +334,7 @@ describe("real MCP Streamable HTTP integration", () => {
           ? { versionNegotiation: { mode: { pin: "2026-07-28" } } }
           : {},
       );
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL(endpoint)),
-      );
+      await client.connect(authenticatedTransport(new URL(endpoint)));
       const call = (name: ToolName, args: Record<string, unknown>) =>
         client.callTool({ name, arguments: args });
       const created = await call("write_file", {
@@ -310,9 +412,7 @@ describe("real MCP Streamable HTTP integration", () => {
         path.join(context.root, "escape"),
         process.platform === "win32" ? "junction" : "dir",
       );
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL(endpoint)),
-      );
+      await client.connect(authenticatedTransport(new URL(endpoint)));
       for (const requested of [
         "../outside/private.txt",
         "C:\\Windows\\file.txt",
@@ -345,9 +445,7 @@ describe("real MCP Streamable HTTP integration", () => {
   it.each(Object.keys(toolSchemas) as ToolName[])(
     "rejects and audits unknown arguments for %s",
     async (name) => {
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL(endpoint)),
-      );
+      await client.connect(authenticatedTransport(new URL(endpoint)));
       const result = await client.callTool({
         name,
         arguments: {
@@ -368,7 +466,7 @@ describe("real MCP Streamable HTTP integration", () => {
   );
 
   it("rejects unsafe overwrite, confirmation, stale-hash, binary and oversized input requests over HTTP", async () => {
-    await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
+    await client.connect(authenticatedTransport(new URL(endpoint)));
     await writeFile(path.join(context.root, "binary.bin"), Buffer.from([0, 1]));
     for (const [name, args] of [
       ["write_file", { path: "PROJECT_STATE.md", content: "overwrite" }],

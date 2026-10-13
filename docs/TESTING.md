@@ -1,4 +1,4 @@
-# Testing — M2
+# Testing — M3
 
 Run `npm run build`, `npm run typecheck`, `npm test`, and `npm run format:check`. For the transport workflow alone: `npm test -- tests/http.test.ts`.
 
@@ -6,4 +6,4 @@ Tests use isolated ignored fixtures, never real user projects. Coverage includes
 
 On this Windows host, creating a file symlink returns EPERM without Developer Mode/symlink privileges. That single test explicitly skips with a reason; real junction tests still execute. No permission or security check is disabled.
 
-M1 Inspector captures remain under `docs/evidence/` as historical M1 evidence, including its negative-case Windows CLI teardown assertion. M2 verification is the executed automated SDK HTTP suite; no new Inspector GUI or Codex connection is claimed. Minimal final counts are recorded in `docs/evidence/m2-verification.txt`.
+M1/M2 evidence remains historical. M3 adds five focused authentication/configuration/hostname tests; the prior HTTP workflows now supply a test token. Targeted auth/HTTP tests are used during development; the full suite runs once at completion. Actual loopback/HTTPS verification and Inspector CLI results are recorded in `docs/evidence/m3-verification.txt`. No Inspector GUI or Codex connection is claimed.

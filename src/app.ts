@@ -1,18 +1,38 @@
 import { createMcpExpressApp } from "@modelcontextprotocol/express";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
-import type { ErrorRequestHandler } from "express";
+import express, { type ErrorRequestHandler } from "express";
 import type { Sandbox } from "./security/sandbox.js";
 import { createServer } from "./tools/index.js";
 import { stderrAudit, type AuditSink } from "./logging/audit.js";
 import { toolSchemas, type ToolName } from "./tools/schemas.js";
+import { bearerAuthentication } from "./security/auth.js";
 
-export function createApp(sandbox: Sandbox, audit: AuditSink = stderrAudit) {
-  const app = createMcpExpressApp({ host: "127.0.0.1", jsonLimit: "256kb" });
+export function createApp(
+  sandbox: Sandbox,
+  options: { bearerToken: string; publicHost?: string | undefined },
+  audit: AuditSink = stderrAudit,
+) {
+  const app = express();
   app.disable("x-powered-by");
+  app.use(bearerAuthentication(options.bearerToken));
+  const hosts = [
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+    ...(options.publicHost ? [options.publicHost] : []),
+  ];
+  const mcpApp = createMcpExpressApp({
+    host: "127.0.0.1",
+    allowedHosts: hosts,
+    allowedOrigins: hosts,
+    jsonLimit: "256kb",
+  });
+  mcpApp.disable("x-powered-by");
+  app.use(mcpApp);
   const handler = createMcpHandler(() => createServer(sandbox, audit));
   const nodeHandler = toNodeHandler(handler);
-  app.all("/mcp", (req, res, next) => {
+  mcpApp.all("/mcp", (req, res, next) => {
     // SDK schema rejection happens before the tool callback; audit it here
     // without recording untrusted argument values.
     const body: unknown = req.body;

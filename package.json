@@ -1,9 +1,15 @@
 {
   "name": "secure-mcp-file-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "M2: six sandboxed filesystem tools over loopback MCP Streamable HTTP",
+  "description": "M3: authenticated sandboxed MCP file server with local PM2 deployment",
   "type": "module",
+  "overrides": {
+    "pm2": {
+      "js-yaml": "4.3.2",
+      "basic-ftp": "6.2.3"
+    }
+  },
   "engines": {
     "node": ">=24 <25"
   },
@@ -11,6 +17,11 @@
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "dev": "node --env-file-if-exists=.env --import tsx src/server.ts",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:status": "pm2 status",
+    "pm2:restart": "pm2 restart secure-mcp-file-server",
+    "pm2:stop": "pm2 stop secure-mcp-file-server",
+    "verify:deployment": "node --env-file=.env scripts/verify-deployment.mjs",
     "init:workspace": "node scripts/init-workspace.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.test.json",
@@ -28,6 +39,7 @@
     "@modelcontextprotocol/client": "2.3.1",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
+    "pm2": "7.0.4",
     "prettier": "^3.0.0",
     "tsx": "^4.0.0",
     "typescript": "^6.0.0",

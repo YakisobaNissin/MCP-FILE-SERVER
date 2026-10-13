@@ -4,11 +4,18 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
 import { isWithin, Sandbox } from "../security/sandbox.js";
 import { WorkspaceError } from "../security/errors.js";
+import { loadBearerToken } from "../security/auth.js";
 
 export const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 const environmentSchema = z.object({
   WORKSPACE_ROOT: z.string().min(1),
+  MCP_TOKEN_FILE: z.string().min(1).optional(),
+  PUBLIC_HOST: z
+    .string()
+    .max(253)
+    .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/)
+    .optional(),
   PORT: z
     .string()
     .regex(/^\d+$/)
@@ -36,5 +43,16 @@ export async function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
       "The managed workspace and source repository must be separate directories.",
     );
   }
-  return { sandbox, port: parsed.data.PORT, host: "127.0.0.1" as const };
+  const bearerToken = await loadBearerToken(
+    parsed.data.MCP_TOKEN_FILE,
+    repository,
+    sandbox.root,
+  );
+  return {
+    sandbox,
+    port: parsed.data.PORT,
+    host: "127.0.0.1" as const,
+    bearerToken,
+    publicHost: parsed.data.PUBLIC_HOST,
+  };
 }

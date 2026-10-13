@@ -1,6 +1,6 @@
 # Architecture
 
-MCP client → loopback Express /mcp → official SDK protocol/schema validation → tool wrapper/audit → filesystem services → shared sandbox → separate workspace.
+MCP client → ngrok HTTPS → loopback Express → bearer authentication → Host/Origin and JSON guards → SDK /mcp protocol/schema validation → tool wrapper/audit → filesystem services → shared sandbox → separate workspace.
 
 The transport remains stateless and uses the existing SDK v2 packages. A single Sandbox is shared by per-request server instances so mutation serialization spans requests. Listing and search share the bounded scanner; file operations share descriptor reads, hashing, staging and security limits. MCP errors are sanitized centrally.
 

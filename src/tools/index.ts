@@ -19,7 +19,7 @@ export function createServer(
 ): McpServer {
   const server = new McpServer({
     name: "secure-mcp-file-server",
-    version: "0.2.0",
+    version: "0.3.0",
   });
   function wrap<Input, Result extends object>(
     tool: ToolName,
