@@ -1,0 +1,48 @@
+{
+  "tools": [
+    {
+      "name": "list_files",
+      "title": "List workspace files",
+      "description": "List permitted files/directories inside the workspace. Returns relative paths, type, byte size and modification time. Hidden/protected entries and links are omitted. Use a narrow path and next_offset; recursive scans have a 1000-entry/8-level budget. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "default": ".",
+            "description": "Relative directory. Use . for the workspace root.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "recursive": {
+            "default": false,
+            "description": "Include nested directories, up to 8 levels.",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Maximum entries returned (1–100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "default": 0,
+            "description": "Skip this many permitted entries. Use next_offset from the previous result.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

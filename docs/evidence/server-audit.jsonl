@@ -1,0 +1,2 @@
+{"time":"2026-10-13T10:49:40.862Z","tool":"list_files","outcome":"success","duration_ms":19,"returned":9}
+{"time":"2026-10-13T10:50:29.732Z","tool":"list_files","outcome":"error","duration_ms":0,"error_code":"INVALID_PATH"}

@@ -1,0 +1,36 @@
+{
+  "name": "secure-mcp-file-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "M1: sandboxed, read-only MCP file listing over loopback Streamable HTTP",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "dev": "node --env-file-if-exists=.env --import tsx src/server.ts",
+    "init:workspace": "node scripts/init-workspace.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/express": "2.0.2",
+    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "express": "^5.1.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.0.0"
+  }
+}
