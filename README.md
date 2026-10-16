@@ -25,7 +25,27 @@ npm run init:workspace
 if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 ```
 
-Edit `.env`: set `WORKSPACE_ROOT`, `MCP_TOKEN_FILE`, `PORT`, and `PUBLIC_HOST`. The initializer creates the sibling `demo-workspace` and preserves existing files. Provision a cryptographically random 32-byte base64url token in the private file; restrict its Windows permissions and its parent directory to your account and SYSTEM. Never commit or print credentials. Existing local token storage can be reused. Set `OAUTH_KEY_FILE` in that same private directory. The public hostname must match your ngrok domain. Git tools require a workspace Git repository prepared by you; they never initialize or stage files.
+Edit `.env`: set `WORKSPACE_ROOT`, `MCP_TOKEN_FILE`, `OAUTH_KEY_FILE`, `PORT`, and `PUBLIC_HOST`. The initializer creates the sibling `demo-workspace` and preserves existing files. Reuse an existing private token file if one is already configured. For a fresh setup, create the private directory and owner token in PowerShell; this refuses to overwrite an existing token:
+
+```powershell
+$privateDir = 'C:\MCPAssignment\.mcp-secrets'
+$tokenPath = Join-Path $privateDir 'mcp-token'
+New-Item -ItemType Directory -Path $privateDir -Force | Out-Null
+if (Test-Path -LiteralPath $tokenPath) { throw 'Token already exists; keep it or choose another path.' }
+$account = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+icacls $privateDir /inheritance:r
+if ($LASTEXITCODE -ne 0) { throw 'Could not restrict private directory permissions.' }
+icacls $privateDir /grant:r "$($account):(OI)(CI)F" 'SYSTEM:(OI)(CI)F'
+if ($LASTEXITCODE -ne 0) { throw 'Could not grant private directory permissions.' }
+$bytes = New-Object byte[] 32
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+[IO.File]::WriteAllText($tokenPath, $token, [Text.Encoding]::ASCII)
+$rng.Dispose()
+```
+
+Keep the token private; never print or commit it. Set `MCP_TOKEN_FILE` and `OAUTH_KEY_FILE` to files in that directory. The public hostname must match your ngrok domain. Git tools require a workspace Git repository prepared by you; they never initialize or stage files.
 
 ```powershell
 npm run build
