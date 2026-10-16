@@ -4,8 +4,15 @@ import { WorkspaceError } from "./errors.js";
 
 // A deliberately conservative policy: all hidden entries are protected, plus
 // common credential stores and key/certificate/database exports.
+export function isDevelopmentFile(segment: string): boolean {
+  return [".gitignore", ".editorconfig", ".prettierrc.json"].includes(
+    segment.toLowerCase(),
+  );
+}
+
 export function isProtectedSegment(segment: string): boolean {
   const name = segment.toLowerCase();
+  if (isDevelopmentFile(name)) return false;
   return (
     name.startsWith(".") ||
     /^(node_modules|credentials?|secrets?|passwords?|passwd|kubeconfig|id_rsa|id_dsa|id_ecdsa|id_ed25519|authorized_keys|known_hosts|desktop\.ini|thumbs\.db)$/.test(
@@ -60,7 +67,10 @@ export function validateRelativePath(input: string): string[] {
       "Empty, parent-relative, device, and ambiguous Windows path segments are not permitted.",
     );
   }
-  if (segments.some(isProtectedSegment)) {
+  if (
+    segments.some(isProtectedSegment) ||
+    segments.slice(0, -1).some(isDevelopmentFile)
+  ) {
     throw new WorkspaceError(
       "PROTECTED_PATH",
       "This path is protected by the workspace policy.",
@@ -116,6 +126,11 @@ export class Sandbox {
           "The path is outside the workspace.",
         );
       const stats = await lstat(current);
+      if (stats.isDirectory() && isDevelopmentFile(path.basename(current)))
+        throw new WorkspaceError(
+          "PROTECTED_PATH",
+          "Development dotfile exceptions apply to files, not directories.",
+        );
       if (stats.isSymbolicLink())
         throw new WorkspaceError(
           "LINK_NOT_ALLOWED",

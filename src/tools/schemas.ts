@@ -92,6 +92,43 @@ export const deleteFileSchema = z.strictObject({
     ),
   expected_sha256: sha256,
 });
+export const createDirectorySchema = z.strictObject({ path: filePath });
+export const editFileSchema = z.strictObject({
+  path: filePath,
+  expected_sha256: sha256,
+  edits: z
+    .array(
+      z.strictObject({
+        old_text: textInput.refine(
+          (text) => text.length > 0,
+          "old_text must not be empty.",
+        ),
+        new_text: textInput,
+      }),
+    )
+    .min(1)
+    .max(20)
+    .refine(
+      (edits) =>
+        edits.reduce(
+          (bytes, edit) =>
+            bytes +
+            Buffer.byteLength(edit.old_text) +
+            Buffer.byteLength(edit.new_text),
+          0,
+        ) <= MAX_INPUT_BYTES,
+      "Combined edits must fit within 16 KiB.",
+    ),
+});
+export const moveFileSchema = z.strictObject({
+  source: filePath,
+  destination: filePath,
+  expected_sha256: sha256,
+});
+export const restoreFileSchema = z.strictObject({
+  recovery_id: z.uuid(),
+  confirm: z.literal(true),
+});
 export const searchFilesSchema = z.strictObject({
   path: z.string().min(1).max(512).default("."),
   query: z.string().min(1).max(256).refine(validText),
@@ -165,5 +202,9 @@ export const toolSchemas = {
   git_diff: gitDiffSchema,
   append_plan_log: appendPlanLogSchema,
   create_checkpoint: createCheckpointSchema,
+  create_directory: createDirectorySchema,
+  edit_file: editFileSchema,
+  move_file: moveFileSchema,
+  restore_file: restoreFileSchema,
 };
 export type ToolName = keyof typeof toolSchemas;

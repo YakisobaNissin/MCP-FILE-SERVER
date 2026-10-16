@@ -7,10 +7,14 @@ import {
 import { Router, urlencoded, type RequestHandler } from "express";
 import Provider, { errors, type Configuration } from "oidc-provider";
 
-export const CLAUDE_CALLBACK = "https://claude.ai/api/mcp/auth_callback";
-export const CLAUDE_CLIENT_ID =
-  "https://claude.ai/oauth/mcp-oauth-client-metadata";
-const SCOPE = "workspace";
+import { defaultClients, type TrustedClient } from "../config/clients.js";
+import {
+  profileFromScopes,
+  profileScopes,
+  workspaceScopes,
+  type AccessProfile,
+} from "./permissions.js";
+const SCOPE = workspaceScopes.join(" ");
 const OWNER = "workspace-owner";
 const digest = (text: string) => createHash("sha256").update(text).digest();
 const escape = (text: string) =>
@@ -24,12 +28,21 @@ const escape = (text: string) =>
 
 export interface OAuthSettings {
   issuer: string;
+  clients?: TrustedClient[];
   jwks: NonNullable<Configuration["jwks"]>;
 }
 
 /** A single-owner authorization service. Grants deliberately expire on restart. */
 export function createOAuth(settings: OAuthSettings, ownerToken: string) {
   const issuer = settings.issuer;
+  const clients = settings.clients ?? defaultClients;
+  const clientForCallback = (redirect: unknown) =>
+    clients.find((client) => client.redirect_uri === redirect);
+  const trustedIdentity = (id: string) =>
+    clients.some((client) => client.metadata_url === id);
+  const callbackOrigins = [
+    ...new Set(clients.map((client) => new URL(client.redirect_uri).origin)),
+  ].join(" ");
   const resource = `${issuer}/mcp`;
   const expected = digest(ownerToken);
   const provider = new Provider(`${issuer}/oauth`, {
@@ -50,8 +63,8 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
         ack: "draft-02",
         // Resolve only the published identity we support; preserve the library's
         // HTTPS, response-size, redirect, client-id and private-IP checks.
-        allowFetch: (_ctx, clientId) => clientId === CLAUDE_CLIENT_ID,
-        allowClient: (_ctx, client) => client.clientId === CLAUDE_CLIENT_ID,
+        allowFetch: (_ctx, clientId) => trustedIdentity(clientId),
+        allowClient: (_ctx, client) => trustedIdentity(client.clientId),
         cacheDuration: { min: 60, max: 3600 },
       },
       registration: { enabled: true },
@@ -77,12 +90,28 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
       },
     },
     fetchResponseBodyLimits: { "client_id metadata document": 16384 },
-    // Limit this deployment to Claude Web and the grants implemented here.
+    // Restrict registrations to operator-configured client identities and exact callbacks.
     extraClientMetadata: {
-      properties: ["workspace_policy"],
+      properties: ["workspace_policy", "token_endpoint_auth_methods_supported"],
       validator: (_ctx, _key, _value, metadata) => {
         // Claude's shared metadata also declares JWT bearer. Keep only the
         // authorization-code/refresh subset this service actually implements.
+        const transition = metadata as typeof metadata & {
+          token_endpoint_auth_methods_supported?: unknown;
+        };
+        // Some trusted CIMD documents advertise multiple methods during the transition.
+        // Select public-client auth only when the document explicitly supports it.
+        if (
+          typeof metadata.client_id === "string" &&
+          trustedIdentity(metadata.client_id) &&
+          Array.isArray(transition.token_endpoint_auth_methods_supported) &&
+          transition.token_endpoint_auth_methods_supported.includes("none")
+        ) {
+          metadata.token_endpoint_auth_method = "none";
+          delete metadata.token_endpoint_auth_signing_alg;
+          delete metadata.jwks;
+          delete metadata.jwks_uri;
+        }
         const declaredGrants = metadata.grant_types;
         if (
           Array.isArray(declaredGrants) &&
@@ -101,7 +130,11 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
         }
         if (
           metadata.redirect_uris?.length !== 1 ||
-          metadata.redirect_uris[0] !== CLAUDE_CALLBACK ||
+          !clientForCallback(metadata.redirect_uris[0]) ||
+          (typeof metadata.client_id === "string" &&
+            trustedIdentity(metadata.client_id) &&
+            clients.find((client) => client.metadata_url === metadata.client_id)
+              ?.redirect_uri !== metadata.redirect_uris[0]) ||
           !["none", "client_secret_basic", "client_secret_post"].includes(
             metadata.token_endpoint_auth_method ?? "client_secret_basic",
           ) ||
@@ -115,7 +148,7 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
           (Array.isArray(metadata.request_uris) && metadata.request_uris.length)
         ) {
           throw new errors.InvalidClientMetadata(
-            "Only the Claude Web callback and supported client authentication methods are allowed.",
+            "Only configured web-client callbacks and supported client authentication methods are allowed.",
           );
         }
       },
@@ -167,7 +200,7 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'none'; form-action 'self' https://claude.ai; frame-ancestors 'none'; base-uri 'none'",
+      `default-src 'none'; form-action 'self' ${callbackOrigins}; frame-ancestors 'none'; base-uri 'none'`,
     );
     if (req.headers["x-forwarded-proto"] !== "https") {
       res.status(400).send("Use the configured HTTPS endpoint for sign-in.");
@@ -189,7 +222,7 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
       const details = await provider.interactionDetails(req, res);
       if (
         !["login", "consent"].includes(details.prompt.name) ||
-        details.params.redirect_uri !== CLAUDE_CALLBACK
+        !clientForCallback(details.params.redirect_uri)
       ) {
         res.status(400).send("Unsupported authorization request.");
         return;
@@ -203,13 +236,35 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
       const csrf = randomBytes(32).toString("base64url");
       forms.set(details.uid, { csrf, expires: Date.now() + 600000 });
       const login = details.prompt.name === "login";
+      const client = clientForCallback(details.params.redirect_uri)!;
+      const requested = String(details.params.scope ?? "").split(" ");
+      const profiles = (Object.keys(profileScopes) as AccessProfile[]).filter(
+        (profile) => requested.includes(profileScopes[profile]),
+      );
+      if (!profiles.length) {
+        res
+          .status(400)
+          .send(
+            "Reconnect the connector with workspace:read, workspace:report, or workspace:edit scopes. Legacy grants must be reauthorized.",
+          );
+        return;
+      }
+      const labels = {
+        inspect: "Inspect: read, search and Git review only",
+        report:
+          "Plan/report: inspect, write WORKFLOWS documents and project state, record handoffs",
+        edit: "Edit: all fourteen tools, including moves, recoverable deletion and restoration",
+      };
+      const selection = login
+        ? ""
+        : `<label>Access profile <select name="profile">${profiles.map((profile) => `<option value="${profile}">${labels[profile]}</option>`).join("")}</select></label>`;
       res
         .type("html")
         .send(
-          `<!doctype html><html lang="en"><meta charset="utf-8"><title>Authorize Secure MCP File Server</title><h1>Authorize Claude</h1><p>Allow Claude to use all ten tools in your configured workspace, including writing files and recoverable deletion. The recipient is <strong>claude.ai</strong>.</p><p>Only approve a connection you started. Never enter your Claude password here.</p><form method="post" action="/oauth/interaction/${escape(details.uid)}"><input type="hidden" name="csrf" value="${csrf}">${login ? '<label>Private MCP token <input name="owner_token" type="password" autocomplete="off" required maxlength="128"></label><p>Enter the token stored privately on your Windows computer, without the Bearer prefix.</p>' : "<p>You are signed in as the workspace owner.</p>"}<button name="decision" value="approve">Authorize Claude</button><button name="decision" value="deny" formnovalidate>Cancel</button></form></html>`,
+          `<!doctype html><html lang="en"><meta charset="utf-8"><title>Authorize Secure MCP File Server</title><h1>Authorize ${escape(client.name)}</h1><p>Connect to your configured workspace. The recipient is <strong>${escape(new URL(client.redirect_uri).hostname)}</strong>.</p><p>Only approve a connection you started. Never enter your AI account password here. Permissions belong to this connection, including chats sharing it.</p><form method="post" action="/oauth/interaction/${escape(details.uid)}"><input type="hidden" name="csrf" value="${csrf}">${login ? '<label>Private MCP token <input name="owner_token" type="password" autocomplete="off" required maxlength="128"></label><p>Enter the private MCP token without the Bearer prefix.</p>' : `<p>You are signed in as the workspace owner.</p>${selection}`}<button name="decision" value="approve">Continue</button><button name="decision" value="deny" formnovalidate>Cancel</button></form></html>`,
         );
     } catch {
-      res.status(400).send("Sign-in expired. Start again from Claude.");
+      res.status(400).send("Sign-in expired. Start again from your connector.");
     }
   });
   router.post(
@@ -244,7 +299,7 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
         }
         if (
           body.decision !== "approve" ||
-          details.params.redirect_uri !== CLAUDE_CALLBACK
+          !clientForCallback(details.params.redirect_uri)
         ) {
           res.status(400).end();
           return;
@@ -262,7 +317,9 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
               failures = 0;
               blockedUntil = Date.now() + 300000;
             }
-            res.status(401).send("Sign-in failed. Start again from Claude.");
+            res
+              .status(401)
+              .send("Sign-in failed. Start again from your connector.");
             return;
           }
           failures = 0;
@@ -281,7 +338,28 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
             clientId: String(details.params.client_id),
           });
           grant.addOIDCScope("openid offline_access");
-          grant.addResourceScope(resource, SCOPE);
+          const profile = body.profile;
+          if (
+            profile !== "inspect" &&
+            profile !== "report" &&
+            profile !== "edit"
+          ) {
+            res.status(400).send("Choose a valid access profile.");
+            return;
+          }
+          const requested = String(details.params.scope ?? "").split(" ");
+          if (!requested.includes(profileScopes[profile])) {
+            res
+              .status(400)
+              .send("The selected profile was not requested by this client.");
+            return;
+          }
+          grant.addResourceScope(resource, profileScopes[profile]);
+          // Remember explicitly declined scopes so consent does not loop on a broad client request.
+          grant.rejectResourceScope(
+            resource,
+            workspaceScopes.filter((scope) => scope !== profileScopes[profile]),
+          );
           const grantId = await grant.save();
           await provider.interactionFinished(
             req,
@@ -293,7 +371,9 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
           res.status(400).send("Unsupported authorization request.");
         }
       } catch {
-        res.status(400).send("Sign-in expired. Start again from Claude.");
+        res
+          .status(400)
+          .send("Sign-in expired. Start again from your connector.");
       }
     },
   );
@@ -312,6 +392,7 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
       revocation_endpoint: `${issuer}/oauth/token/revocation`,
       jwks_uri: `${issuer}/oauth/jwks`,
       response_types_supported: ["code"],
+      authorization_response_iss_parameter_supported: true,
       grant_types_supported: ["authorization_code", "refresh_token"],
       token_endpoint_auth_methods_supported: [
         "none",
@@ -319,18 +400,19 @@ export function createOAuth(settings: OAuthSettings, ownerToken: string) {
         "client_secret_post",
       ],
       code_challenge_methods_supported: ["S256"],
-      scopes_supported: [SCOPE, "offline_access"],
+      scopes_supported: [...workspaceScopes, "offline_access"],
     },
-    async verify(token: string): Promise<boolean> {
+    async verify(token: string): Promise<AccessProfile | undefined> {
       const access = await provider.AccessToken.find(token);
-      return (
-        !!access &&
-        access.accountId === OWNER &&
-        access.aud === resource &&
-        access.scopes.has(SCOPE) &&
-        typeof access.exp === "number" &&
-        access.exp > Math.floor(Date.now() / 1000)
-      );
+      if (
+        !access ||
+        access.accountId !== OWNER ||
+        access.aud !== resource ||
+        typeof access.exp !== "number" ||
+        access.exp <= Math.floor(Date.now() / 1000)
+      )
+        return undefined;
+      return profileFromScopes(access.scopes);
     },
   };
 }

@@ -1,0 +1,9 @@
+{
+  "clients": [
+    {
+      "name": "Claude Web",
+      "metadata_url": "https://claude.ai/oauth/mcp-oauth-client-metadata",
+      "redirect_uri": "https://claude.ai/api/mcp/auth_callback"
+    }
+  ]
+}

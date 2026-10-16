@@ -12,6 +12,12 @@ import { stderrAudit, type AuditSink } from "./logging/audit.js";
 import { toolSchemas, type ToolName } from "./tools/schemas.js";
 import { bearerAuthentication } from "./security/auth.js";
 import { createOAuth, type OAuthSettings } from "./security/oauth.js";
+import {
+  authorizeTool,
+  requestAccess,
+  workspaceScopes,
+} from "./security/permissions.js";
+import { publicError } from "./security/errors.js";
 
 export function createApp(
   sandbox: Sandbox,
@@ -46,7 +52,7 @@ export function createApp(
         res.json({
           resource: oauth.resource,
           authorization_servers: [oauth.issuer],
-          scopes_supported: ["workspace"],
+          scopes_supported: workspaceScopes,
           bearer_methods_supported: ["header"],
         });
       },
@@ -70,7 +76,9 @@ export function createApp(
   });
   mcpApp.disable("x-powered-by");
   app.use(mcpApp);
-  const handler = createMcpHandler(() => createServer(sandbox, audit));
+  const handler = createMcpHandler(() =>
+    createServer(sandbox, audit, requestAccess.getStore() ?? "inspect"),
+  );
   const nodeHandler = toNodeHandler(handler);
   mcpApp.all("/mcp", (req, res, next) => {
     // SDK schema rejection happens before the tool callback; audit it here
@@ -93,10 +101,36 @@ export function createApp(
       ) {
         const args = "arguments" in params ? params.arguments : {};
         const tool = params.name as ToolName;
+        const profile = requestAccess.getStore() ?? "inspect";
+        try {
+          authorizeTool(profile, tool, args);
+        } catch (error) {
+          const safe = publicError(error);
+          audit({
+            time: new Date().toISOString(),
+            tool,
+            profile,
+            outcome: "error",
+            duration_ms: 0,
+            error_code: safe.code,
+          });
+          res.json({
+            jsonrpc: "2.0",
+            id: "id" in body ? body.id : null,
+            result: {
+              isError: true,
+              content: [
+                { type: "text", text: JSON.stringify({ error: safe }) },
+              ],
+            },
+          });
+          return;
+        }
         if (!toolSchemas[tool].safeParse(args).success) {
           audit({
             time: new Date().toISOString(),
             tool,
+            profile,
             outcome: "error",
             duration_ms: 0,
             error_code: "INVALID_INPUT",

@@ -59,6 +59,7 @@ export async function scanEntries(
         // The same policy covers requested paths and all discovered entries.
         const target = await sandbox.resolveExisting(childPath);
         const stats = await lstat(target);
+        if (stats.isFile() && stats.nlink !== 1) continue;
         if (!stats.isDirectory() && !stats.isFile()) continue;
         found.push({
           path: childPath,

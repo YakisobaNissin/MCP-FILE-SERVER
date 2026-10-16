@@ -12,7 +12,12 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { WorkspaceError } from "../security/errors.js";
-import { Sandbox, validateRelativePath } from "../security/sandbox.js";
+import {
+  Sandbox,
+  validateRelativePath,
+  isDevelopmentFile,
+  isWithin,
+} from "../security/sandbox.js";
 import {
   MAX_FILE_BYTES,
   MAX_READ_BYTES,
@@ -24,8 +29,12 @@ import {
   writeFileSchema,
   strReplaceSchema,
   deleteFileSchema,
+  createDirectorySchema,
+  editFileSchema,
+  moveFileSchema,
+  restoreFileSchema,
 } from "../tools/schemas.js";
-import type { z } from "zod/v4";
+import { z } from "zod/v4";
 
 export const digest = (bytes: Buffer): string =>
   createHash("sha256").update(bytes).digest("hex");
@@ -413,6 +422,209 @@ export async function deleteTextFile(
       deleted: true,
       recoverable: true,
       recovery_id: recoveryId,
+    };
+  });
+}
+
+export async function createDirectory(
+  sandbox: Sandbox,
+  raw: z.input<typeof createDirectorySchema>,
+) {
+  const input = createDirectorySchema.parse(raw);
+  return sandbox.mutate(async () => {
+    const parts = validateRelativePath(input.path);
+    if (!parts.length || isDevelopmentFile(parts.at(-1)!))
+      throw new WorkspaceError(
+        "INVALID_PATH",
+        "Choose a non-root directory path.",
+      );
+    try {
+      await sandbox.directory(input.path);
+      return { path: relativeName(input.path), created: false };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const { target } = await sandbox.creationTarget(input.path);
+    await mkdir(target, { mode: 0o700 });
+    await sandbox.directory(input.path);
+    return { path: relativeName(input.path), created: true };
+  });
+}
+
+export async function editTextFile(
+  sandbox: Sandbox,
+  raw: z.input<typeof editFileSchema>,
+) {
+  const input = editFileSchema.parse(raw);
+  return sandbox.mutate(async () => {
+    const snapshot = await readSnapshot(sandbox, input.path);
+    expectedHash(snapshot.sha256, input.expected_sha256);
+    let updated = snapshot.text;
+    for (const edit of input.edits) {
+      const index = updated.indexOf(edit.old_text);
+      if (index < 0)
+        throw new WorkspaceError(
+          "NO_MATCH",
+          "An edit did not match. No edits were saved; read the file again.",
+        );
+      if (updated.indexOf(edit.old_text, index + 1) >= 0)
+        throw new WorkspaceError(
+          "MULTIPLE_MATCHES",
+          "An edit matched more than once. No edits were saved; use a larger unique selection.",
+        );
+      updated =
+        updated.slice(0, index) +
+        edit.new_text +
+        updated.slice(index + edit.old_text.length);
+      if (Buffer.byteLength(updated) > MAX_FILE_BYTES)
+        throw new WorkspaceError(
+          "FILE_TOO_LARGE",
+          "Edits would exceed the 256 KiB file limit. No edits were saved.",
+        );
+    }
+    const bytes = Buffer.from(updated);
+    const temporary = await stage(
+      path.dirname(snapshot.target),
+      bytes,
+      snapshot.stats.mode,
+    );
+    try {
+      await unchanged(sandbox, input.path, snapshot);
+      await rename(temporary, snapshot.target);
+    } finally {
+      await unlink(temporary).catch(() => {});
+    }
+    return {
+      path: relativeName(input.path),
+      replacements: input.edits.length,
+      size_bytes: bytes.length,
+      sha256: digest(bytes),
+    };
+  });
+}
+
+export async function moveTextFile(
+  sandbox: Sandbox,
+  raw: z.input<typeof moveFileSchema>,
+) {
+  const input = moveFileSchema.parse(raw);
+  return sandbox.mutate(async () => {
+    if (
+      relativeName(input.source).toLowerCase() ===
+      relativeName(input.destination).toLowerCase()
+    )
+      throw new WorkspaceError(
+        "INVALID_PATH",
+        "Source and destination must be different paths; case-only renames are not supported.",
+      );
+    const snapshot = await readSnapshot(sandbox, input.source);
+    expectedHash(snapshot.sha256, input.expected_sha256);
+    await sandbox.creationTarget(input.destination);
+    await unchanged(sandbox, input.source, snapshot);
+    const published = await createTextFile(
+      sandbox,
+      input.destination,
+      snapshot.bytes,
+    );
+    // Copy-then-remove avoids overwrites and leaves a complete destination if source removal fails.
+    try {
+      await unchanged(sandbox, input.source, snapshot);
+      await unlink(snapshot.target);
+    } catch {
+      return {
+        source: relativeName(input.source),
+        destination: published.path,
+        moved: false,
+        destination_created: true,
+        source_removed: false,
+        sha256: published.sha256,
+        message:
+          "Destination was created, but source removal failed or conflicted. Inspect both paths before continuing.",
+      };
+    }
+    return {
+      source: relativeName(input.source),
+      destination: published.path,
+      moved: true,
+      destination_created: true,
+      source_removed: true,
+      sha256: published.sha256,
+    };
+  });
+}
+
+const recoveryMetadata = z.strictObject({
+  path: z.string().min(1).max(512),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  deleted_at: z.string().datetime(),
+});
+
+export async function restoreTextFile(
+  sandbox: Sandbox,
+  raw: z.input<typeof restoreFileSchema>,
+) {
+  const input = restoreFileSchema.parse(raw);
+  return sandbox.mutate(async () => {
+    const recovery = await sandbox.recoveryDirectory();
+    const directory = path.join(recovery, input.recovery_id);
+    const record = await Sandbox.create(directory);
+    if (!isWithin(recovery, record.root) || record.root !== directory)
+      throw new WorkspaceError(
+        "UNSAFE_RECOVERY",
+        "Recovery record is not a real private directory.",
+      );
+    const metadata = await readSnapshot(record, "metadata.json");
+    if (metadata.bytes.length > 4096)
+      throw new WorkspaceError(
+        "UNSAFE_RECOVERY",
+        "Recovery metadata is too large.",
+      );
+    let parsed: z.infer<typeof recoveryMetadata>;
+    try {
+      parsed = recoveryMetadata.parse(JSON.parse(metadata.text));
+    } catch {
+      throw new WorkspaceError(
+        "UNSAFE_RECOVERY",
+        "Recovery metadata is invalid. Ask the operator to inspect it.",
+      );
+    }
+    const snapshot = await readSnapshot(record, "file");
+    if (snapshot.sha256 !== parsed.sha256)
+      throw new WorkspaceError(
+        "UNSAFE_RECOVERY",
+        "Recovered content differs from its recorded hash.",
+      );
+    await sandbox.creationTarget(parsed.path);
+    await sandbox.recoveryDirectory();
+    await unchanged(record, "metadata.json", metadata);
+    await unchanged(record, "file", snapshot);
+    const published = await createTextFile(
+      sandbox,
+      parsed.path,
+      snapshot.bytes,
+    );
+    let recoveryRetained = false;
+    try {
+      await sandbox.recoveryDirectory();
+      await unchanged(record, "metadata.json", metadata);
+      await unchanged(record, "file", snapshot);
+      await unlink(snapshot.target);
+      await unlink(metadata.target);
+      await rmdir(directory);
+    } catch {
+      recoveryRetained = true;
+    }
+    return {
+      ...published,
+      restored: true,
+      recovery_id: input.recovery_id,
+      recovery_retained: recoveryRetained,
+      ...(recoveryRetained
+        ? {
+            message:
+              "File restored; recovery cleanup was incomplete. Ask the operator to inspect the recovery record.",
+          }
+        : {}),
     };
   });
 }

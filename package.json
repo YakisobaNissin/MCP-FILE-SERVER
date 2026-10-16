@@ -1,8 +1,8 @@
 {
   "name": "secure-mcp-file-server",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "Authenticated sandboxed MCP file server with Git review and persistent handoffs",
+  "description": "Authenticated MCP editing toolkit with permission profiles and persistent handoffs",
   "type": "module",
   "overrides": {
     "pm2": {

@@ -1,12 +1,14 @@
 import type { ToolName } from "../tools/schemas.js";
+import type { AccessProfile } from "../security/permissions.js";
 
 export interface AuditEvent {
   time: string;
   tool: ToolName;
-  outcome: "success" | "error";
+  outcome: "success" | "partial" | "error";
   duration_ms: number;
   returned?: number;
   error_code?: string;
+  profile?: AccessProfile;
 }
 
 export type AuditSink = (event: AuditEvent) => void;

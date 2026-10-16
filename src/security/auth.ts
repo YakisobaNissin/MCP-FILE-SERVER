@@ -4,6 +4,7 @@ import path from "node:path";
 import type { RequestHandler } from "express";
 import { WorkspaceError } from "./errors.js";
 import { isWithin } from "./sandbox.js";
+import { requestAccess, type AccessProfile } from "./permissions.js";
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
 const hash = (value: string) => createHash("sha256").update(value).digest();
@@ -74,7 +75,10 @@ export async function loadBearerToken(
 /** Protect MCP before parsing; only explicit OAuth routes have their own gate. */
 export function bearerAuthentication(
   token: string,
-  oauth?: { verify(token: string): Promise<boolean>; metadataUrl: string },
+  oauth?: {
+    verify(token: string): Promise<AccessProfile | undefined>;
+    metadataUrl: string;
+  },
 ): RequestHandler {
   requireTokenFormat(token);
   const expected = hash(token);
@@ -87,22 +91,22 @@ export function bearerAuthentication(
     const match = /^Bearer ([A-Za-z0-9._~-]{1,2048})$/i.exec(
       req.headers.authorization ?? "",
     );
-    let accepted = false;
+    let profile: AccessProfile | undefined;
     if (authorizationCount === 1 && match) {
-      accepted = timingSafeEqual(hash(match[1]!), expected);
-      if (!accepted && oauth) {
+      if (timingSafeEqual(hash(match[1]!), expected)) profile = "edit";
+      if (!profile && oauth) {
         try {
-          accepted = await oauth.verify(match[1]!);
+          profile = await oauth.verify(match[1]!);
         } catch {
-          accepted = false;
+          profile = undefined;
         }
       }
     }
-    if (!accepted) {
+    if (!profile) {
       res.setHeader(
         "WWW-Authenticate",
         oauth
-          ? `Bearer realm="mcp-file-server", resource_metadata="${oauth.metadataUrl}", scope="workspace"`
+          ? `Bearer realm="mcp-file-server", resource_metadata="${oauth.metadataUrl}", scope="workspace:read workspace:report workspace:edit"`
           : 'Bearer realm="mcp-file-server"',
       );
       res.setHeader("Cache-Control", "no-store");
@@ -110,6 +114,6 @@ export function bearerAuthentication(
       return;
     }
     res.setHeader("Cache-Control", "no-store");
-    next();
+    requestAccess.run(profile, next);
   };
 }
