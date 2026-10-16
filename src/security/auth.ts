@@ -71,25 +71,40 @@ export async function loadBearerToken(
   }
 }
 
-/** Apply before JSON parsing and before every externally reachable route. */
-export function bearerAuthentication(token: string): RequestHandler {
+/** Protect MCP before parsing; only explicit OAuth routes have their own gate. */
+export function bearerAuthentication(
+  token: string,
+  oauth?: { verify(token: string): Promise<boolean>; metadataUrl: string },
+): RequestHandler {
   requireTokenFormat(token);
   const expected = hash(token);
-  return (req, res, next) => {
+  return async (req, res, next) => {
     let authorizationCount = 0;
     for (let index = 0; index < req.rawHeaders.length; index += 2) {
       if (req.rawHeaders[index]?.toLowerCase() === "authorization")
         authorizationCount++;
     }
-    const match = /^Bearer ([A-Za-z0-9_-]{43,128})$/i.exec(
+    const match = /^Bearer ([A-Za-z0-9._~-]{1,2048})$/i.exec(
       req.headers.authorization ?? "",
     );
-    if (
-      authorizationCount !== 1 ||
-      !match ||
-      !timingSafeEqual(hash(match[1]!), expected)
-    ) {
-      res.setHeader("WWW-Authenticate", 'Bearer realm="mcp-file-server"');
+    let accepted = false;
+    if (authorizationCount === 1 && match) {
+      accepted = timingSafeEqual(hash(match[1]!), expected);
+      if (!accepted && oauth) {
+        try {
+          accepted = await oauth.verify(match[1]!);
+        } catch {
+          accepted = false;
+        }
+      }
+    }
+    if (!accepted) {
+      res.setHeader(
+        "WWW-Authenticate",
+        oauth
+          ? `Bearer realm="mcp-file-server", resource_metadata="${oauth.metadataUrl}", scope="workspace"`
+          : 'Bearer realm="mcp-file-server"',
+      );
       res.setHeader("Cache-Control", "no-store");
       res.status(401).json({ error: "Unauthorized" });
       return;

@@ -11,6 +11,8 @@ import {
   deleteTextFile,
 } from "../services/text-files.js";
 import { searchFiles } from "../services/search.js";
+import { gitStatus, gitDiff } from "../services/git.js";
+import { appendPlanLog, createCheckpoint } from "../services/handoff.js";
 import { toolSchemas, type ToolName } from "./schemas.js";
 
 export function createServer(
@@ -19,7 +21,7 @@ export function createServer(
 ): McpServer {
   const server = new McpServer({
     name: "secure-mcp-file-server",
-    version: "0.3.0",
+    version: "0.4.0",
   });
   function wrap<Input, Result extends object>(
     tool: ToolName,
@@ -137,6 +139,46 @@ export function createServer(
       annotations: readOnly,
     },
     wrap("search_files", (input) => searchFiles(sandbox, input)),
+  );
+  server.registerTool(
+    "git_status",
+    {
+      description:
+        "Read compact Git status only for the workspace root repository and permitted files. No Git initialization or arbitrary commands. Private paths/links/submodules are omitted. At most 200 scoped files; inspect truncated before assuming completeness.",
+      inputSchema: toolSchemas.git_status,
+      annotations: readOnly,
+    },
+    wrap("git_status", (input) => gitStatus(sandbox, input)),
+  );
+  server.registerTool(
+    "git_diff",
+    {
+      description:
+        "Read a bounded tracked-file diff in the workspace root repository. Optional exact relative file paths and staged flag. No revisions, arbitrary options, external diff/text conversion or directory comparisons. Hidden/protected paths and unsafe repositories are rejected.",
+      inputSchema: toolSchemas.git_diff,
+      annotations: readOnly,
+    },
+    wrap("git_diff", (input) => gitDiff(sandbox, input)),
+  );
+  server.registerTool(
+    "append_plan_log",
+    {
+      description:
+        "Append one structured progress entry to the server-selected UTC task/day JSONL log under PLAN_LOG. Required task ID, role, action, result and next step. No caller-supplied filename; serialized bounded appends preserve existing valid records. Returns the path and record ID.",
+      inputSchema: toolSchemas.append_plan_log,
+      annotations: mutation,
+    },
+    wrap("append_plan_log", (input) => appendPlanLog(sandbox, input)),
+  );
+  server.registerTool(
+    "create_checkpoint",
+    {
+      description:
+        "Create an exclusive server-named JSON handoff checkpoint under CHECKPOINTS, referencing the current PROJECT_STATE.md hash. Supply task ID, role, summary, completed/remaining work, blockers and next steps. Read/update project state first; this tool does not update state or orchestrate agents.",
+      inputSchema: toolSchemas.create_checkpoint,
+      annotations: mutation,
+    },
+    wrap("create_checkpoint", (input) => createCheckpoint(sandbox, input)),
   );
   return server;
 }

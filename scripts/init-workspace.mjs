@@ -6,16 +6,18 @@ import { fileURLToPath } from "node:url";
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const root = path.resolve(repository, "../demo-workspace");
 const files = {
+  ".gitignore":
+    ".mcp-trash/\n.mcp-tmp-*\n.env*\n*.key\n*.pem\ncredentials*\nsecrets*\n",
   "PROJECT_STATE.md":
-    "# Project state\n\nMilestone: M1\nStatus: Ready for local listing verification\nObjective: Build a secure MCP file connector.\nBlockers: None for M1.\nNext: Verify list_files, then approve M2.\n",
+    "# Project state\n\nTask: DEMO-001\nStatus: Ready for planning\nObjective: Demonstrate a resumable task through MCP.\nCompleted: Workspace initialized.\nBlockers: None.\nNext steps: Read projects/welcome.md, record a plan, then create a checkpoint.\nLatest checkpoint: None yet.\n",
   "PLAN_LOG/README.md":
-    "# Plan log\n\nReserved for structured progress records in M4.\n",
+    "# Plan log\n\nappend_plan_log appends versioned JSONL to YYYY-MM-DD_TASK-ID.jsonl (UTC). Keep prior entries unchanged.\n",
   "CHECKPOINTS/README.md":
-    "# Checkpoints\n\nReserved for handoff records in M4.\n",
+    "# Checkpoints\n\ncreate_checkpoint creates UTC timestamp_TASK-ID_UUID.json records with state hashes. Find the newest matching task with list_files.\n",
   "DECISIONS/README.md":
-    "# Decisions\n\nReserved for shared project decisions in M4.\n",
+    "# Decisions\n\nUse YYYY-MM-DD_TASK-ID_short-name.md. Include context, decision, alternatives and consequences. Write through write_file; keep history.\n",
   "projects/welcome.md":
-    "# Demo project\n\nThis safe sample is visible through the M1 list_files tool.\n",
+    "# Demo project\n\nThis safe sample is visible through the list_files tool.\n",
 };
 
 async function ensureDirectory(directory) {

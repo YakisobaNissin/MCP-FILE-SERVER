@@ -228,20 +228,69 @@ export async function writeTextFile(
   raw: z.input<typeof writeFileSchema>,
 ) {
   const input = writeFileSchema.parse(raw);
+  return sandbox.mutate(() =>
+    createTextFile(sandbox, input.path, Buffer.from(input.content, "utf8")),
+  );
+}
+
+async function createTextFile(
+  sandbox: Sandbox,
+  relative: string,
+  bytes: Buffer,
+) {
+  const { target, parent } = await sandbox.creationTarget(relative);
+  const temporary = await stage(parent, bytes, 0o600);
+  try {
+    await sandbox.creationTarget(relative);
+    // Hard-link publication is exclusive: no replace and no partially written destination.
+    await link(temporary, target);
+  } finally {
+    await unlink(temporary).catch(() => {});
+  }
+  return {
+    path: relativeName(relative),
+    created: true,
+    size_bytes: bytes.length,
+    sha256: digest(bytes),
+  };
+}
+
+/** Internal append operation: caller supplies a fixed protocol path and validates old records. */
+export async function appendTextFile(
+  sandbox: Sandbox,
+  relative: string,
+  addition: string,
+  validateExisting: (text: string) => void,
+) {
   return sandbox.mutate(async () => {
-    const { target, parent } = await sandbox.creationTarget(input.path);
-    const bytes = Buffer.from(input.content, "utf8");
-    const temporary = await stage(parent, bytes, 0o600);
+    let snapshot: Awaited<ReturnType<typeof readSnapshot>>;
     try {
-      await sandbox.creationTarget(input.path);
-      // Hard-link publication is exclusive: no replace and no partially written destination.
-      await link(temporary, target);
+      snapshot = await readSnapshot(sandbox, relative);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return createTextFile(sandbox, relative, Buffer.from(addition));
+    }
+    validateExisting(snapshot.text);
+    const bytes = Buffer.from(snapshot.text + addition);
+    if (bytes.length > 64 * 1024)
+      throw new WorkspaceError(
+        "LOG_FULL",
+        "This task/day log reached 64 KiB. Start a new task ID or archive it manually.",
+      );
+    const temporary = await stage(
+      path.dirname(snapshot.target),
+      bytes,
+      snapshot.stats.mode,
+    );
+    try {
+      await unchanged(sandbox, relative, snapshot);
+      await rename(temporary, snapshot.target);
     } finally {
       await unlink(temporary).catch(() => {});
     }
     return {
-      path: relativeName(input.path),
-      created: true,
+      path: relativeName(relative),
+      created: false,
       size_bytes: bytes.length,
       sha256: digest(bytes),
     };

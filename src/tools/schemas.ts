@@ -100,6 +100,60 @@ export const searchFilesSchema = z.strictObject({
   max_results: z.number().int().min(1).max(100).default(20),
 });
 
+export const gitStatusSchema = z.strictObject({
+  limit: z.number().int().min(1).max(100).default(50),
+});
+export const gitDiffSchema = z.strictObject({
+  paths: z
+    .array(filePath)
+    .min(1)
+    .max(20)
+    .optional()
+    .describe(
+      "Optional exact relative file paths, not Git options, directories or pathspec expressions.",
+    ),
+  staged: z
+    .boolean()
+    .default(false)
+    .describe("Compare index to HEAD instead of working tree to index."),
+});
+
+const taskId = z.string().regex(/^[A-Z0-9][A-Z0-9_-]{0,63}$/);
+const role = z.enum(["planning", "implementation", "review"]);
+const handoffText = z
+  .string()
+  .min(1)
+  .max(2000)
+  .refine(
+    (value) => Buffer.byteLength(value) <= 2000 && validText(value),
+    "Use at most 2000 UTF-8 bytes of text.",
+  );
+const handoffItems = z
+  .array(
+    z
+      .string()
+      .min(1)
+      .max(400)
+      .refine((value) => Buffer.byteLength(value) <= 400 && validText(value)),
+  )
+  .max(6);
+export const appendPlanLogSchema = z.strictObject({
+  task_id: taskId,
+  agent_role: role,
+  action: handoffText,
+  result: handoffText,
+  next_step: handoffText,
+});
+export const createCheckpointSchema = z.strictObject({
+  task_id: taskId,
+  agent_role: role,
+  summary: handoffText,
+  completed_work: handoffItems,
+  remaining_work: handoffItems,
+  blockers: handoffItems,
+  next_steps: handoffItems.min(1),
+});
+
 export const toolSchemas = {
   list_files: listFilesSchema,
   read_file: readFileSchema,
@@ -107,5 +161,9 @@ export const toolSchemas = {
   str_replace: strReplaceSchema,
   delete_file: deleteFileSchema,
   search_files: searchFilesSchema,
+  git_status: gitStatusSchema,
+  git_diff: gitDiffSchema,
+  append_plan_log: appendPlanLogSchema,
+  create_checkpoint: createCheckpointSchema,
 };
 export type ToolName = keyof typeof toolSchemas;

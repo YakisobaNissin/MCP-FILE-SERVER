@@ -1,4 +1,8 @@
-import { createMcpExpressApp } from "@modelcontextprotocol/express";
+import {
+  createMcpExpressApp,
+  hostHeaderValidation,
+  originValidation,
+} from "@modelcontextprotocol/express";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import express, { type ErrorRequestHandler } from "express";
@@ -7,21 +11,57 @@ import { createServer } from "./tools/index.js";
 import { stderrAudit, type AuditSink } from "./logging/audit.js";
 import { toolSchemas, type ToolName } from "./tools/schemas.js";
 import { bearerAuthentication } from "./security/auth.js";
+import { createOAuth, type OAuthSettings } from "./security/oauth.js";
 
 export function createApp(
   sandbox: Sandbox,
-  options: { bearerToken: string; publicHost?: string | undefined },
+  options: {
+    bearerToken: string;
+    publicHost?: string | undefined;
+    oauth?: OAuthSettings | undefined;
+  },
   audit: AuditSink = stderrAudit,
 ) {
   const app = express();
   app.disable("x-powered-by");
-  app.use(bearerAuthentication(options.bearerToken));
   const hosts = [
     "localhost",
     "127.0.0.1",
     "[::1]",
     ...(options.publicHost ? [options.publicHost] : []),
   ];
+  const oauth = options.oauth
+    ? createOAuth(options.oauth, options.bearerToken)
+    : undefined;
+  if (oauth) {
+    const publicGuards = [hostHeaderValidation(hosts), originValidation(hosts)];
+    app.get(
+      [
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+      ],
+      ...publicGuards,
+      (_req, res) => {
+        res.setHeader("Cache-Control", "no-store");
+        res.json({
+          resource: oauth.resource,
+          authorization_servers: [oauth.issuer],
+          scopes_supported: ["workspace"],
+          bearer_methods_supported: ["header"],
+        });
+      },
+    );
+    app.get(
+      "/.well-known/oauth-authorization-server/oauth",
+      ...publicGuards,
+      (_req, res) => {
+        res.setHeader("Cache-Control", "no-store");
+        res.json(oauth.metadata);
+      },
+    );
+    app.use("/oauth", ...publicGuards, oauth.router);
+  }
+  app.use(bearerAuthentication(options.bearerToken, oauth));
   const mcpApp = createMcpExpressApp({
     host: "127.0.0.1",
     allowedHosts: hosts,

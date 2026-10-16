@@ -7,10 +7,11 @@ async function main(): Promise<void> {
   const { app, close } = createApp(config.sandbox, {
     bearerToken: config.bearerToken,
     publicHost: config.publicHost,
+    oauth: config.oauth,
   });
   const listener = app.listen(config.port, config.host, () => {
     console.error(
-      `M3 authenticated MCP endpoint: http://${config.host}:${config.port}/mcp (loopback)`,
+      `Authenticated MCP endpoint: http://${config.host}:${config.port}/mcp (loopback)`,
     );
   });
   listener.on("error", () => {

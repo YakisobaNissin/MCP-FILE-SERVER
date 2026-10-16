@@ -171,6 +171,18 @@ export class Sandbox {
     return { target, parent };
   }
 
+  async ensureHandoffDirectory(
+    name: "PLAN_LOG" | "CHECKPOINTS",
+  ): Promise<void> {
+    await this.directory(".");
+    try {
+      await mkdir(path.join(this.root, name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    await this.directory(name);
+  }
+
   /** Internal-only recovery location. User-supplied hidden paths stay blocked. */
   async recoveryDirectory(): Promise<string> {
     await this.directory(".");

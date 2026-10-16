@@ -1,8 +1,8 @@
 {
   "name": "secure-mcp-file-server",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "M3: authenticated sandboxed MCP file server with local PM2 deployment",
+  "description": "Authenticated sandboxed MCP file server with Git review and persistent handoffs",
   "type": "module",
   "overrides": {
     "pm2": {
@@ -21,10 +21,9 @@
     "pm2:status": "pm2 status",
     "pm2:restart": "pm2 restart secure-mcp-file-server",
     "pm2:stop": "pm2 stop secure-mcp-file-server",
-    "verify:deployment": "node --env-file=.env scripts/verify-deployment.mjs",
     "init:workspace": "node scripts/init-workspace.mjs",
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.test.json",
+    "init:oauth": "node --env-file=.env scripts/init-oauth.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -33,16 +32,16 @@
     "@modelcontextprotocol/node": "2.1.1",
     "@modelcontextprotocol/server": "2.3.1",
     "express": "^5.1.0",
+    "oidc-provider": "9.12.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.3.1",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
+    "@types/oidc-provider": "9.12.1",
     "pm2": "7.0.4",
     "prettier": "^3.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^6.0.0",
-    "vitest": "^4.0.0"
+    "typescript": "^6.0.0"
   }
 }

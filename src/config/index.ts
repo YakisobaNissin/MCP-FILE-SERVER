@@ -5,12 +5,15 @@ import { z } from "zod/v4";
 import { isWithin, Sandbox } from "../security/sandbox.js";
 import { WorkspaceError } from "../security/errors.js";
 import { loadBearerToken } from "../security/auth.js";
+import { loadOAuthSettings } from "./oauth.js";
 
 export const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 const environmentSchema = z.object({
   WORKSPACE_ROOT: z.string().min(1),
   MCP_TOKEN_FILE: z.string().min(1).optional(),
+  OAUTH_ENABLED: z.enum(["true", "false"]).default("false"),
+  OAUTH_KEY_FILE: z.string().min(1).optional(),
   PUBLIC_HOST: z
     .string()
     .max(253)
@@ -54,5 +57,14 @@ export async function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     host: "127.0.0.1" as const,
     bearerToken,
     publicHost: parsed.data.PUBLIC_HOST,
+    oauth:
+      parsed.data.OAUTH_ENABLED === "true"
+        ? await loadOAuthSettings(
+            parsed.data.OAUTH_KEY_FILE,
+            parsed.data.PUBLIC_HOST,
+            repository,
+            sandbox.root,
+          )
+        : undefined,
   };
 }
